@@ -1,22 +1,45 @@
-import {
+const {
   GraphQLObjectType,
   GraphQLInt,
   GraphQLString,
   GraphQLList,
   GraphQLNonNull,
-} from 'graphql';
-import {
-  fromGlobalId,
-} from 'graphql-relay';
+} = require('graphql');
+const { fromGlobalId } = require('graphql-relay');
 
-import PokemonType from './PokemonType';
-
-import {
+const PokemonType = require('./PokemonType');
+const tracer = require('../trace/tracer');
+const {
   getPokemons,
   getPokemonById,
   getPokemonByName,
-} from '../service/Pokemon';
+} = require('../service/Pokemon');
 
+const QUERY_FILE = 'src/type/QueryType.js';
+
+function now() {
+  return Number(process.hrtime.bigint()) / 1e6;
+}
+
+function traceHop(action, category, args, started, result) {
+  const list = Array.isArray(result) ? result : (result ? [result] : []);
+  const typeSet = new Set();
+  for (const pokemon of list) {
+    for (const type of pokemon.types || []) typeSet.add(type);
+  }
+  tracer.record({
+    file: QUERY_FILE,
+    action,
+    category,
+    args,
+    hits: Array.isArray(result) ? result.length : (result ? 1 : 0),
+    durationMs: Math.round((now() - started) * 1000) / 1000,
+    cacheHit: null,
+    waited: false,
+    name: list.length === 1 ? list[0].name : (args && args.name ? String(args.name) : ''),
+    types: Array.from(typeSet).sort().join(', '),
+  });
+}
 
 const QueryType = new GraphQLObjectType({
   name: 'Query',
@@ -33,7 +56,12 @@ const QueryType = new GraphQLObjectType({
           type: new GraphQLNonNull(GraphQLInt),
         },
       },
-      resolve: async (obj, args) => await getPokemons(args),
+      resolve: async (obj, args) => {
+        const started = now();
+        const result = await getPokemons(args);
+        traceHop('resolve:pokemons', 'pokemons', args, started, result);
+        return result;
+      },
     },
     pokemon: {
       type: PokemonType,
@@ -46,12 +74,17 @@ const QueryType = new GraphQLObjectType({
         },
       },
       resolve: async (obj, { id, name }) => {
+        const started = now();
         if (id) {
-          return await getPokemonById(fromGlobalId(id).id);
+          const result = await getPokemonById(fromGlobalId(id).id);
+          traceHop('resolve:pokemon', 'pokemon', { id }, started, result);
+          return result;
         }
 
         if (name) {
-          return await getPokemonByName(name);
+          const result = await getPokemonByName(name);
+          traceHop('resolve:pokemon', 'pokemon', { name }, started, result);
+          return result;
         }
 
         throw new Error(
@@ -62,4 +95,4 @@ const QueryType = new GraphQLObjectType({
   }),
 });
 
-export default QueryType;
+module.exports = QueryType;

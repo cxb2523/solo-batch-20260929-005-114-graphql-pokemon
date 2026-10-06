@@ -1,46 +1,61 @@
-#!/usr/bin/env babel-node --optional es7.asyncFunctions
-/**
- * This file provided by Facebook is for non-commercial testing and evaluation
- * purposes only.  Facebook reserves all rights not expressly granted.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * FACEBOOK BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
+#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+const { graphql } = require('graphql');
+const { introspectionQuery, printSchema } = require('graphql/utilities');
 
-import { graphql } from 'graphql';
-import { introspectionQuery, printSchema } from 'graphql/utilities';
-import fs from 'fs';
-import path from 'path';
+const GraphQLSchema = require('../src/schema');
+const { checkDrift } = require('../src/trace/drift');
 
-import GraphQLSchema from '../src/schema';
+const SCHEMAS_DIR = path.join(__dirname, '..', 'schemas');
+const writeMode = process.argv.includes('--write');
 
-async function generateSchema(schema, relativePath) {
-  const result = await (graphql(schema, introspectionQuery));
+async function regenerate() {
+  const result = await graphql(GraphQLSchema, introspectionQuery);
 
   if (result.errors) {
     console.error(
       'ERROR introspecting schema: ',
       JSON.stringify(result.errors, null, 2)
     );
-  } else {
-    fs.writeFileSync(
-      path.join(__dirname, `${relativePath}/schema.json`),
-      JSON.stringify(result, null, 2)
-    );
-
-    fs.writeFileSync(
-      path.join(__dirname, `${relativePath}/schema.graphql`),
-      printSchema(schema)
-    );
+    process.exit(1);
   }
+
+  fs.writeFileSync(
+    path.join(SCHEMAS_DIR, 'schema.json'),
+    JSON.stringify(result, null, 2)
+  );
+
+  fs.writeFileSync(
+    path.join(SCHEMAS_DIR, 'schema.graphql'),
+    printSchema(GraphQLSchema)
+  );
+
+  console.log('Regenerated schemas/schema.{json,graphql} from src/type/*.js (source of truth).');
 }
 
-(async () => {
-  await generateSchema(GraphQLSchema, '../schemas');
+async function main() {
+  if (writeMode) {
+    await regenerate();
+    return;
+  }
 
-  process.exit(0);
-})();
+  const { drift, conflicts } = checkDrift();
+  if (drift) {
+    console.error('DRIFT detected: schemas/schema.graphql diverges from src/type/*.js (source of truth).');
+    for (const conflict of conflicts) {
+      console.error(`  [${conflict.where}:${conflict.line}] ${conflict.text}`);
+    }
+    console.error('Run `node scripts/buildSchema.js --write` to regenerate the snapshot.');
+    process.exit(1);
+  }
+
+  console.log('OK: no drift. schemas/schema.graphql matches src/type/*.js');
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

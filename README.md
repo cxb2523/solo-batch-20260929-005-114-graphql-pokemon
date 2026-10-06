@@ -77,3 +77,31 @@ This was built as part of a talk on Relay & GraphQL at [@ReactSP](https://meetup
 ## Related Projects
 
 * [Pokemon Gopher](https://github.com/racerxdl/pokemon-gopher) - Fetch information about pokémons with GraphQL and GO 🙂
+
+## Observability (/trace)
+
+The `pokemons.json` fetch chain is observable end to end: every hop
+(`src/type/QueryType.js` / `src/type/PokemonType.js` -> `src/service/Pokemon.js`)
+records file, args, hit count and duration into an in-memory ring buffer
+(`src/trace/tracer.js`, capacity 500), rendered at `GET /trace` as an
+auto-refreshing (2s) table filterable by `name` / `type` / `category`
+(`GET /trace.json` for the raw view).
+
+Decisions (fixed):
+
+- **Source of truth**: `src/type/*.js`. `schemas/schema.graphql` is a derived
+  snapshot; `node scripts/buildSchema.js` exits non-zero on drift and `/trace`
+  highlights conflicting lines in red. `node scripts/buildSchema.js --write`
+  regenerates the snapshot.
+- **Caching**: `src/service/Pokemon.js` keeps an in-process index
+  (`list` / `byId` / `byName`). Invalidation: `mtime`+`size` fast check, and on
+  mismatch a SHA-256 content hash revalidation; if the hash changed it falls
+  back to re-reading the file and rebuilding the index.
+- **Concurrency**: index rebuilds are single-flight — concurrent callers await
+  the same rebuild promise instead of reading a stale snapshot, so filter
+  results never contain stale hits and measured durations include the wait.
+- **Evolution chains**: `getPokemonByEvolutions` reuses the same `byName`
+  index; `pokemons.json` is never parsed twice.
+
+Acceptance: `node scripts/buildSchema.js` (no drift), `node index.js`
+(serves on :5000), `node scripts/verifyFlow.js` (exit 0).

@@ -32,18 +32,16 @@
     "pokemon",
     "pogoapi",
     "pokeapi",
-    "koa",
     "graphql",
     "relay"
   ],
   "license": "MIT",
-  "main": "dist/index.js",
+  "main": "index.js",
   "repository": "https://github.com/lucasbento/graphql-pokemon",
   "scripts": {
     "eslint": "eslint src/*",
-    "build-app": "rm -rf dist/* && babel src --out-dir dist --copy-files",
-    "build-schema": "babel-node ./scripts/buildSchema.js",
-    "start": "node dist/index.js",
-    "watch": "nodemon src/index.js --exec babel-node --copy-files"
+    "build-schema": "node scripts/buildSchema.js",
+    "verify-flow": "node scripts/verifyFlow.js",
+    "start": "node index.js"
   }
 }

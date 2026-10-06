@@ -1,19 +1,24 @@
-import {
+const {
   GraphQLObjectType,
   GraphQLString,
   GraphQLInt,
   GraphQLFloat,
   GraphQLList,
-} from 'graphql';
-import {
-  globalIdField,
-} from 'graphql-relay';
+} = require('graphql');
+const { globalIdField } = require('graphql-relay');
 
-import PokemonDimensionType from './PokemonDimensionType';
-import PokemonAttackType from './PokemonAttackType';
-import EvolutionRequirementType from './EvolutionRequirementType';
+const PokemonDimensionType = require('./PokemonDimensionType');
+const PokemonAttackType = require('./PokemonAttackType');
+const EvolutionRequirementType = require('./EvolutionRequirementType');
+const tracer = require('../trace/tracer');
 
-import { getPokemonByEvolutions } from '../service/Pokemon';
+const { getPokemonByEvolutions } = require('../service/Pokemon');
+
+const TYPE_FILE = 'src/type/PokemonType.js';
+
+function now() {
+  return Number(process.hrtime.bigint()) / 1e6;
+}
 
 const PokemonType = new GraphQLObjectType({
   name: 'Pokemon',
@@ -77,7 +82,28 @@ const PokemonType = new GraphQLObjectType({
     evolutions: {
       type: new GraphQLList(PokemonType),
       description: 'The evolutions of this Pokémon',
-      resolve: async obj => await getPokemonByEvolutions(obj.evolutions),
+      resolve: async (obj) => {
+        const started = now();
+        const result = await getPokemonByEvolutions(obj.evolutions);
+        const list = Array.isArray(result) ? result : [];
+        const typeSet = new Set();
+        for (const pokemon of list) {
+          for (const type of pokemon.types || []) typeSet.add(type);
+        }
+        tracer.record({
+          file: TYPE_FILE,
+          action: 'resolve:evolutions',
+          category: 'evolution',
+          args: { from: obj.name },
+          hits: list.length,
+          durationMs: Math.round((now() - started) * 1000) / 1000,
+          cacheHit: null,
+          waited: false,
+          name: obj.name,
+          types: Array.from(typeSet).sort().join(', '),
+        });
+        return result;
+      },
     },
     evolutionRequirements: {
       type: EvolutionRequirementType,
@@ -97,4 +123,4 @@ const PokemonType = new GraphQLObjectType({
   }),
 });
 
-export default PokemonType;
+module.exports = PokemonType;

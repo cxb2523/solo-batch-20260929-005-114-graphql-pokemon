@@ -1,13 +1,15 @@
-import Koa from 'koa';
-import cors from 'koa-cors';
-import graphqlHTTP from 'koa-graphql';
-import convert from 'koa-convert';
+const Koa = require('koa');
+const cors = require('koa-cors');
+const graphqlHTTP = require('koa-graphql');
+const convert = require('koa-convert');
 
-import schema from './schema';
+const schema = require('./schema');
+const traceMiddleware = require('./trace/traceEndpoint');
 
 const app = new Koa();
 
 app
+  .use(traceMiddleware)
   .use(convert(cors()))
   .use(convert(graphqlHTTP(async () => ({
     graphiql: true,
@@ -20,4 +22,4 @@ app
   })
 )));
 
-export default app;
+module.exports = app;
